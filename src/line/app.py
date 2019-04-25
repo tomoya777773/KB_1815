@@ -1,132 +1,248 @@
-# -*- coding: utf-8 -*-
-
-import urllib.parse
-import os
-import sys
-import requests,json
-from argparse import ArgumentParser
-from userlist import user_list
-import random
-from flask import Flask, request, abort
-from linebot import (
-    LineBotApi, WebhookHandler
-)
-from linebot.exceptions import (
-    InvalidSignatureError
-)
-from linebot.models import (
-    MessageEvent, TextMessage, TextSendMessage,
-)
-app = Flask(__name__)
-
-hatsuwa_flag = False
-
-channel_secret = os.environ["channel_secret"]
-channel_access_token = os.environ["channel_acces_token"]
-admin_ID = os.environ['admin_ID']
-print(admin_ID)
-line_bot_api = LineBotApi(channel_access_token)
-handler = WebhookHandler(channel_secret)
-
-@app.route("/button_on", methods=['POST'])
-def button_on():
-    #写真を撮る
-    #スピーカーが誰か尋ねる
-    #マイクで音声から文字起こし
-    postimage("https://shop.r10s.jp/book/cabinet/4798/4900459524798_2.jpg",admin_ID)
-    bottan_on("佐川男子") #宿主に電話対応するか尋ねる
+from func import *
 
 
+@app.route("/important", methods=['POST'])
+def important():
+    post2admin('重要な書類が届きました')
+    data = request.data.decode('utf-8')
+    data = json.loads(data)
+    path = ENDPOINT['RASPI1'] + '/images/' + data['result']
+    postimage2one(path)
+    poststamp('11537','52002741')
+
+@app.route("/who", methods=['POST'])
+def who(body):
+    print(body)
+    # notification(body)
+    return() 
 @app.route("/callback", methods=['POST'])
 def callback():
     global hatsuwa_flag
+    global registration_flag
+    global login_flag
     body = request.get_json()
     body2 = body.get("events")
-    
     for i in body2:
-        ID= i.get("source")["userId"]
+        print(i)
+        ID = i.get("source")["userId"]
         types = i.get("type")
-        
-        if(types=="message"):
-            h = i.get("message")
-            text = h["text"]
-            
-            if True in (x in text  for x in ["開"]):
-                    ask_open_key()
-                
-            elif True in (x in text  for x in ["施錠","閉"]):
-                    ask_close_key()
-            
-            elif hatsuwa_flag:
-                if (text=="対話モードオフ"):
-                    talkmode_switch()
-                else:
-                    post2one(text+" と伝えたよ",ID)
-            else:
-                if(text == "ピンポン"):
-                    #写真を撮る
-                    #スピーカーが誰か尋ねる
-                    #マイクで音声から文字起こし
-                    postimage("https://shop.r10s.jp/book/cabinet/4798/4900459524798_2.jpg",ID)
-                    #postimage("https://80f71b17.ngrok.io/image.jpg",ID)
-                    print(bottan_on("佐川男子")) #宿主に電話対応するか尋ねる
-                elif (text=="対話モードオフ"):
-                    talkmode_swith()
-                else:
-                    post2one("意味がわかりません",ID)
-                    poststamp(11537,52002756,ID)
+        registration_flag = False
+        login_flag = False
 
-        elif(types=="postback"):
-            h = i.get("postback")
-            data = h["data"]
-
-            if(data == "connect video"):
-                post2one("video start",ID)
+        if ID in USER_LIST:
+            registration_flag = True
+            login_flag = True
             
-            elif(data == "ask talkmode"):
-                print("ask_talkmode")
-                ask_talkmode()
-           
-            elif(data == "ask requirements"):
-                print("要件を訪ねます")
-                post2one("要件を訪ねます",ID)
-            
-            elif(data == "open key"):
-                print("開錠します")
-                open_key()
-                post2one("開錠します",ID)
-            
-            elif(data == "close key"):
-                print("施錠します")
-                close_key()
-                post2one("施錠します",ID)
-            
-            elif(data == "keep key"):
-                print("取りやめました")
-                post2one("取りやめました",ID)
-            
-            elif(data == "talkmode on"):
-                post2one("対話モード開始",ID)
-                poststamp(11537,52002741,ID)
-                hatsuwa_flag = True
-                template_response(ID)
-            
-            elif(data == "talkmode off"):
-                post2one("対話モード終了",ID)
-                poststamp(11537,52002771,ID)
-                hatsuwa_flag = False
-
-            elif(data == "bye"):
-                post2one("要件だけ聞いておきますね",ID)
-                poststamp(11537,52002750,ID)
-
-        elif(types=="beacon"):
+        elif ID in PASS_SUCCESS:
+            registration_flag = False
+            login_flag = True
+    
+        if(types == "beacon"):
             h = i.get("beacon")
             action = h["type"]
-            beacon_action(action,ID)
-        elif(types=="follow"):
-            print("thanks follw")
-            send_first_message(ID)
+            beacon_action(action, ID)
+        
+        elif(types == "follow"):
+            if ID in USER_LIST:
+                print('おかえり')
+                registration_flag = True
+                login_flag = True
+                name = USER_LIST[ID] 
+                post2one(name + 'さん、お帰りなさいませ！',ID)
+                poststamp('11537','52002736',ID)
+            else:
+                print('新規ユーザ')
+                registration_flag = False
+                login_flag = False
+                send_first_message(ID)
+
+        elif not(login_flag):
+            try:
+                if(types == "postback"):
+                    h = i.get("postback")
+                    data = h["data"]
+                    if(data == PASSWORD_TEMPLETE['TYPE1']['DATA']): #'login'
+                        post2one('pass:ここにパスワードを入力 の形式でパスワードを入力して下さい',ID)
+                    elif(data == PASSWORD_TEMPLETE['TYPE2']['DATA']): #'no_password'
+                        post2one(LOGIN['TO_ADMIN'],ID)
+                        post2admin('登録希望(ID:' + ID + ')が届きました。心当たりがあればパスワードを教えてあげて下さい')
+                else:
+                    h = i.get("message")
+                    text = h["text"]
+                    if(text[0:5] == 'pass:'):
+                        login_flag = login(text[5:],ID)
+                    else:
+                        post2one(LOGIN['PLESE_PASS'],ID)
+                
+            except:
+                post2one(LOGIN['PLESE_PASS'],ID)
+
+        elif not(registration_flag):
+                try:
+                    h = i.get("message")
+                    text = h["text"]
+                    print(text)
+                    if(text[0:5] == 'name:'):
+                        registration_flag = registration(text[5:],ID)
+                    else:
+                        post2one(LOGIN['PLESE_NAME'],ID)
+                    
+                except:
+                    post2one(LOGIN['PLESE_NAME'],ID)
+        else:
+            if(types == "message"):
+                h = i.get("message")
+                text = h["text"]
+        
+                if True in (x in text for x in ["開"]):
+                        ask_open_key(ID)
+        
+                elif True in (x in text for x in ["施錠", "閉"]):
+                        ask_close_key(ID)
+                elif (text == "対話スイッチ"):
+                        talkmode_switch()
+                
+                elif (text == "電話をつないで"):
+                        ask_call(ID)
+        
+                elif (text == "スナップショット"):
+                        ask_snap_shot(ID)
+        
+                elif (text == "決済"):
+                    post2one('https://733bc45e.ngrok.io/reserve', ID)
+                elif hatsuwa_flag:
+                    if (text=="対話モードオフ"):
+                        talkmode_switch()
+                else:
+                    if(text in ['はい','いいえ']):
+                        None
+
+                    elif(text == "ピンポン"):
+                        notification("佐川男子")
+                    else:
+                        post2one("意味がわかりません", ID)
+                        poststamp(11537, 52002756, ID)
+        
+            elif(types == "postback"):
+                h = i.get("postback")
+                data = h["data"]
+        
+                if(data == TALK_TEMPLETE['M1']['TYPE1']['DATA']): #'ask_youken'
+                    post2admin(TALK_TEMPLETE['M1']['TYPE1']['RET'])
+                    overwride(TALK_TEMPLETE['M1']['TYPE1']['DATA'],'default')
+                
+                elif(data == TALK_TEMPLETE['M1']['TYPE2']['DATA']): #'ask_who'
+                    post2admin(TALK_TEMPLETE['M1']['TYPE2']['RET'])
+                    overwride(TALK_TEMPLETE['M1']['TYPE2']['DATA'],'default')
+                
+                elif(data == TALK_TEMPLETE['M2']['TYPE1']['DATA']): #'get_QR'
+                    post2admin(TALK_TEMPLETE['M2']['TYPE1']['RET'])
+                    poststamp(11537,52002736,ID)
+                    overwride(TALK_TEMPLETE['M2']['TYPE1']['DATA'],'default')
+                
+                elif(data == TALK_TEMPLETE['M2']['TYPE2']['DATA']): #'get_info'
+                    post2admin(TALK_TEMPLETE['M2']['TYPE2']['RET'])
+                    poststamp(11537,52002736,ID)
+                    overwride(TALK_TEMPLETE['M2']['TYPE2']['DATA'],'default')
+                
+                elif(data == TALK_TEMPLETE['M3']['TYPE1']['DATA']): #'complete_pay'
+                    complete_pay()
+                    poststamp(11537,52002741,ID)
+                    overwride(TALK_TEMPLETE['M3']['TYPE1']['DATA'],'default')
+                
+                elif(data == TALK_TEMPLETE['M3']['TYPE2']['DATA']): #'complete_info'
+                    complete_info()
+                    poststamp(11537,52002741,ID)
+                    overwride(TALK_TEMPLETE['M3']['TYPE2']['DATA'],'default')
+                
+                elif(data == TALK_TEMPLETE['M4']['TYPE1']['DATA']): #'thanks'
+                    post2admin(TALK_TEMPLETE['M4']['TYPE1']['RET'])
+                    poststamp(11537,52002741,ID)
+                    overwride(TALK_TEMPLETE['M4']['TYPE1']['DATA'],'default')
+                
+                elif(data == TALK_TEMPLETE['M4']['TYPE2']['DATA']): #'every_thanks'
+                    post2admin(TALK_TEMPLETE['M4']['TYPE2']['RET'])
+                    poststamp(11537,52002741,ID)
+                    overwride(TALK_TEMPLETE['M4']['TYPE2']['DATA'],'default')
+        
+                elif(data == "line telephone call"):
+                    post2admin("LINE通話を開始します")
+                    call(ID)
+        
+                elif(data == "line talk"):
+                    post2admin("承知しました")
+                    poststamp(11537, 52002741, ID)
+                    template_response(ID)
+                    hatsuwa_flag = True
+                
+                elif(data == "impossible"):
+                    post2admin("要件だけ聞いておきますね")
+                    poststamp(11537, 52002750, ID)
+        
+                elif(data == "ask requirements"):
+                    print("要件を訪ねます")
+                    post2one("要件を訪ねます", ID)
+                
+                elif(data == "start call"):
+                    try:
+                        call(ID)
+                        post2one("通話を開始します", ID)
+                    except:
+                        post2one("通話に失敗しました", ID)
+        
+                elif(data == "snap shot"):
+                    try:
+                        send_snap_shot(ID)
+                        post2one("撮影しました", ID)
+                    except:
+                        post2one("撮影に失敗しました", ID)
+                
+                elif(data == "uketori_open key"):
+                    try:
+                        open_key()
+                        post2one("開錠しました", ID)
+                        template_response(ID)
+                    except:
+                        post2one("開錠に失敗しました", ID)
+                
+                elif(data == "open key"):
+                    try:
+                        open_key()
+                        post2one("開錠しました", ID)
+                    except:
+                        post2one("開錠に失敗しました", ID)
+
+                elif(data == "complete close key"):
+                    try:
+                        close_key()
+                        post2one("施錠しました", ID)
+                        template_response(ID)
+                    except:
+                        post2one("施錠に失敗しました", ID)
+        
+
+                elif(data == "close key"):
+                    try:
+                        close_key()
+                        post2one("施錠しました", ID)
+                    except:
+                        post2one("施錠に失敗しました", ID)
+        
+                elif(data == "keep key"):
+                    print("取りやめました")
+                    post2one("取りやめました", ID)
+
+                elif(data == "talkmode on"):
+                    post2one("対話モード開始",ID)
+                    poststamp(11537,52002741,ID)
+                    hatsuwa_flag = True
+                    template_response(ID)
+
+                elif(data == "talkmode off"):
+                    post2one("対話モード終了",ID)
+                    poststamp(11537,52002771,ID)
+                    hatsuwa_flag = False
+        
     return 'OK'
 
 @handler.add(MessageEvent, message=TextMessage)
@@ -136,457 +252,137 @@ def message_text(event):
         TextSendMessage(text=event.message.text)
     )
 
-def beacon_action(action,ID):
-    if(action=="enter"):
-        print("becon,enter")
-        post2admin("誰か帰ってきたよ")
+import cek
+import logging
+
+
+clova = cek.Clova(
+    application_id="my.application.id", default_language="en", debug_mode=True)
+    
+NAME_flag = True
+
+@app.route('/clova', methods=['POST'])
+def my_service():
+    body_dict = clova.route(body=request.data, header=request.headers)
+    response = jsonify(body_dict)
+    response.headers['Content-Type'] = 'application/json;charset-UTF-8'
+    return response
+
+@clova.handle.launch
+def launch_request_handler(clova_request):
+    global NAME_flag
+
+    NAME_flag = True
+
+    welcome = cek.Message(message=CLOVA_RES['WELCOME'], language="ja")
+    response = clova.response([welcome])
+    return response
+
+@clova.handle.intent("name_intent")
+def name(clova_request):
+    global NAME_flag
+
+    name = clova_request.slot_value('name_slot')
+
+    if not(NAME_flag):
+        print(CLOVA_RES['NAME2'])
+        name2 = cek.Message(CLOVA_RES['NAME2'], language="ja")
+        response = clova.response([name2])
+        return response
+    
+    elif not(name):
+        name_error = cek.Message(CLOVA_RES['NAME_ERROR'], language="ja")
+        response = clova.response([name_error])
+        return response
+    
     else:
-        None
+        print(name)
+        NAME_flag = False
+        notification(name)
+        get_name = cek.Message(message = name + CLOVA_RES['GET_NAME'], language="ja")
+        on_hold = cek.URL(ENDPOINT['RASPI2'] + "/resources/on_hold.mp3")
+        default = cek.URL(ENDPOINT['RASPI2'] + "/resources/default.mp3")
+        response = clova.response([get_name, on_hold, default])
+        return response
 
-def poststamp(a,b,ID):
-    url = 'https://api.line.me/v2/bot/message/push'
-    data = {
-        "to": ID,
-        "messages":[
-            {
-                "type":'sticker',
-                'packageId' : a,
-                'stickerId' : b,
-            }
-        ]
-    }
-    
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + channel_access_token 
-    }
-    
-    requests.post(url, data=json.dumps(data), headers=headers)
+@clova.handle.intent("show_intent")
+def show(clova_request):
+    global NAME_flag
+    if NAME_flag:
+        ask_name = cek.Message(CLOVA_RES['ASK_NAME'] , language="ja")
+        response = clova.response([ask_name])
+        return response
+        
+    else:
+        try:
+            print('かざした')
+            res = snap_shot()
+            res.json()
+            data = res.json()
+            print('写真のデータ',data['result'])
+            #image_path = ENDPOINT['RASPI2'] + '/images/' + data['result']
+            image_path = ENDPOINT['RASPI2'] + '/images/' + 'yarakasi.png'
+            qr2url(image_path)
+            template_response()
+            show = cek.Message(message = CLOVA_RES['SHOW'], language="ja")
+            on_hold = cek.URL(ENDPOINT['RASPI2'] + "/resources/on_hold.mp3")
+            default = cek.URL(ENDPOINT['RASPI2'] + "/resources/default.mp3")
+            response = clova.response([show, on_hold, on_hold, default])
+            return response
+        except:
+            show_again = cek.Message(message = CLOVA_RES['SHOW_AGAIN'], language="ja")
+            response = clova.response([show_again])
+            return response
 
-def okaeri(ID):
-    post_image = "https://matsuko.link/img/okaeri.jpg"
-    url = 'https://api.line.me/v2/bot/message/push'
-    data = {
-        "to": ID,
-        "messages":[
-            {
-                "type": "image",
-                "originalContentUrl" : post_image,
-                "previewImageUrl":post_image,
-            }
-        ]
-    }
-    
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + channel_access_token 
-    }
+@clova.handle.intent("complete_intent")
+def complete(clova_request):
+    global NAME_flag
 
-    requests.post(url, data=json.dumps(data), headers=headers)
+    if NAME_flag:
+        ask_name = cek.Message(CLOVA_RES['ASK_NAME'] , language="ja")
+        response = clova.response([ask_name])
+        return response
+        response = clova.response([plese_show])
+    else:
+        complete_res()
+        complete = cek.Message(message = CLOVA_RES['COMPLETE'], language="ja")
+        on_hold = cek.URL(ENDPOINT['RASPI2'] + "/resources/on_hold.mp3")
+        default = cek.URL(ENDPOINT['RASPI2'] + "/resources/default.mp3")
+        response = clova.response([complete, on_hold, default])
+        return response
 
-def postimage(post_image,ID):
-    url = 'https://api.line.me/v2/bot/message/push'
-    data = {
-        "to": ID,
-        "messages":[
-            {
-                "type": "image",
-                "originalContentUrl" : post_image,
-                "previewImageUrl":post_image,
-            }
-        ]
-    }
-    
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + channel_access_token 
-    }
-    
-    requests.post(url, data=json.dumps(data), headers=headers)
+@clova.handle.intent("re_delivery_intent")
+def re_delivery(clova_request):
+    global NAME_flag
+    if NAME_flag:
+        ask_name = cek.Message(CLOVA_RES['ASK_NAME'] , language="ja")
+        response = clova.response([ask_name])
+        return response
+    else:
+        day = clova_request.slot_value('day_slot')
+        post2admin(' パパがお忙しそうだったので伝言をうけトリました！')
+        post2admin(day + '、再配達に来るそうです')
+        poststamp('11537','52002736')
+        tell = cek.Message(message = day + CLOVA_RES['TELL'], language="ja")
+        response = clova.response([tell])
+        return response
 
-def post2admin(post_text):
-    print(admin_ID)
-    url = 'https://api.line.me/v2/bot/message/push'
-    data = {
-        "to":admin_ID,
-        "messages":[
-            {
-                "type": "text",
-                "text": post_text 
-            }
-        ]
-    }
-    print(post_text)
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + channel_access_token 
-    }
-    requests.post(url, data=json.dumps(data), headers=headers)
+@clova.handle.default
+def default_handler(request):
+    global NAME_flag
+    if NAME_flag:
+        ask_name = cek.Message(CLOVA_RES['ASK_NAME'] , language="ja")
+        response = clova.response([ask_name])
+        return response
+    else:
+        post2admin('想定される返答が帰って来ませんでした、もう一度お願いします')
+        template_response()
+        default_message = cek.Message(message = CLOVA_RES['DEFAULT'], language="ja")
+        on_hold = cek.URL(ENDPOINT['RASPI2'] + "/resources/on_hold.mp3")
+        default = cek.URL(ENDPOINT['RASPI2'] + "/resources/default.mp3")
+        response = clova.response([default_message, on_hold, default])
+        return response
 
-def post2one(post_text, ID):
-    url = 'https://api.line.me/v2/bot/message/push'
-    data = {
-        "to": ID,
-        "messages":[
-            {
-                "type": "text",
-                "text": post_text 
-            }
-        ]
-    }
-    print(post_text)
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + channel_access_token 
-    }
-    requests.post(url, data=json.dumps(data), headers=headers)
-
-def post2others(post_text, ID):
-    url = 'https://api.line.me/v2/bot/message/push'
-    data = {
-        "to": ID,
-        "messages":[
-            {
-                "type": "text",
-                "text": post_text 
-            }
-        ]
-    }
-
-    print(post_text)
-    
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + channel_access_token 
-    }
-
-    requests.post(url, data=json.dumps(data), headers=headers)
-
-def bottan_on(name,ID=admin_ID):
-    url = 'https://api.line.me/v2/bot/message/push'
-    data = {
-        "to":ID,
-        "messages":[
-        {
-            "type": "template",
-            "altText": "ボタンが押された時のテンプレート",
-            "template": {
-                "type": "buttons",
-                "text":  name + "さんが来客です。現在、電話対応可能ですか？",
-                "actions": [
-                    {
-                      "type": "postback",
-                      "label":"Yes",
-                      "data" : "connect video",
-                    },
-                    {
-                      "type": "postback",
-                      "label":"No",
-                      "data": "ask talkmode",
-                    }
-                ]
-            }
-}
-        ]
-    }
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + channel_access_token 
-    }
-    requests.post(url, data=json.dumps(data), headers=headers)
-    
-
-def ask_close_key():
-    url = 'https://api.line.me/v2/bot/message/push'
-    data = {
-        "to":admin_ID,
-        "messages":[
-        {
-            "type": "template",
-            "altText": "施錠時のテンプレート",
-            "template": {
-                "type": "buttons",
-                "text":  "施錠しますか？",
-                "actions": [
-                    {
-                      "type": "postback",
-                      "label":"Yes",
-                      "data" : "close key",
-                    },
-                    {
-                      "type": "postback",
-                      "label":"No",
-                      "data": "keep key",
-                    }
-                ]
-            }
-}
-        ]
-    }
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + channel_access_token 
-    }
-    requests.post(url, data=json.dumps(data), headers=headers)
-
-def talkmode_switch():
-    url = 'https://api.line.me/v2/bot/message/push'
-    data = {
-        "to":admin_ID,
-        "messages":[
-        {
-            "type": "template",
-            "altText": "対話モードの確認",
-            "template": {
-                "type": "buttons",
-                "text":  "対話モード",
-                "actions": [
-                    {
-                      "type": "postback",
-                      "label":"ON",
-                      "data" : "talkmode on",
-                    },
-                    {
-                      "type": "postback",
-                      "label":"OFF",
-                      "data": "talkmode off",
-                    }
-                ]
-            }
-}
-        ]
-    }
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + channel_access_token 
-    }
-    requests.post(url, data=json.dumps(data), headers=headers)
-
-def ask_talkmode():
-    url = 'https://api.line.me/v2/bot/message/push'
-    data = {
-        "to":admin_ID,
-        "messages":[
-        {
-            "type": "template",
-            "altText": "対話モードの確認",
-            "template": {
-                "type": "buttons",
-                "text":  "LINEで対応可能ですか？",
-                "actions": [
-                    {
-                      "type": "postback",
-                      "label":"Yes",
-                      "data" : "talkmode on",
-                    },
-                    {
-                      "type": "postback",
-                      "label":"No",
-                      "data": "bye",
-                    }
-                ]
-            }
-}
-        ]
-    }
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + channel_access_token 
-    }
-    requests.post(url, data=json.dumps(data), headers=headers)
-def ask_open_key():
-    url = 'https://api.line.me/v2/bot/message/push'
-    data = {
-        "to":admin_ID,
-        "messages":[
-        {
-            "type": "template",
-            "altText": "開錠時のテンプレート",
-            "template": {
-                "type": "buttons",
-                "text":  "開錠しますか？",
-                "actions": [
-                    {
-                      "type": "postback",
-                      "label":"Yes",
-                      "data" : "open key",
-                    },
-                    {
-                      "type": "postback",
-                      "label":"No",
-                      "data": "keep key",
-                    }
-                ]
-            }
-}
-        ]
-    }
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + channel_access_token 
-    }
-    requests.post(url, data=json.dumps(data), headers=headers)
-
-def open_key():
-    response = requests.post('http://ea158e60.ngrok.io/open', )
-    return(response)
-
-def close_key():
-    response = requests.post('http://ea158e60.ngrok.io/close', )
-    return(response)
-
-def send_first_message(ID):
-    url = 'https://api.line.me/v2/bot/message/push'
-    data = {
-        "to": ID,
-        "messages":[
-        {
-            "type": "template",
-            "altText": "This is a buttons template",
-            "template": {
-                "type": "buttons",
-                "thumbnailImageUrl": "https://matsuko.link/img/intro_01.jpg",
-                "imageAspectRatio": "square",
-                "imageSize": "cover",
-                "imageBackgroundColor": "#FFFFFF",
-                "title": "初めまして、あなたはだれ？",
-                "text": "選んで下さい",
-                "actions": [
-                    {
-                      "type": "postback",
-                      "label":"ママ",
-                      "data":ID+":ママ",
-                      "text":"ママだよ"
-                    },
-                    {
-                      "type": "postback",
-                      "label":"パパ",
-                      "data":ID+":パパ",
-                      "text":"パパだよ"
-                    },
-                    {
-                      "type": "postback",
-                      "label":"太郎",
-                      "data":ID+":太郎",
-                      "text":"太郎だよ"
-                    },
-                    {
-                      "type": "postback",
-                      "label":"花子",
-                      "data":ID+":花子",
-                      "text":"花子だよ"
-                    }
-                ]
-            }
-        }
-        ]
-    }
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + channel_access_token 
-    }
-    requests.post(url, data=json.dumps(data), headers=headers)
-
-
-def template_response(ID):
-    url = 'https://api.line.me/v2/bot/message/push'
-    data = {
-        "to": ID,
-        "messages":[
-        {
-            "type": "template",
-            "altText": "定型返答用のカルーセルテンプレート",
-            "template": {
-                "type": "carousel",
-                "columns": [
-                    {
-                      "thumbnailImageUrl": "https://example.com/bot/images/item1.jpg",
-                      "imageBackgroundColor": "#FFFFFF",
-                      "title": "質問",
-                      "text": "訪問者に質問します",
-                      "defaultAction": {
-                          "type": "uri",
-                          "label": "View detail",
-                          "uri": "http://example.com/page/123"
-                      },
-                      "actions": [
-                          {
-                              "type": "postback",
-                              "label": "要件はなんですか？",
-                              "data": "要件はなんですか？",
-                              "text":"要件はなんですか？"
-                          },
-                          {
-                              "type": "postback",
-                              "label": "誰にご用ですか？",
-                              "data": "誰にご用ですか？",
-                              "text":"誰にご用ですか？"
-                          },
-                      ]
-                    },
-                    {
-                      "thumbnailImageUrl": "https://example.com/bot/images/item1.jpg",
-                      "imageBackgroundColor": "#FFFFFF",
-                      "title": "お礼、謝罪",
-                      "text": "お礼をしたり、謝ったり",
-                      "defaultAction": {
-                          "type": "uri",
-                          "label": "View detail",
-                          "uri": "http://example.com/page/123"
-                      },
-                      "actions": [
-                          {
-                              "type": "postback",
-                              "label": "ありがとう",
-                              "data": "ありがとう",
-                              "text":"ありがとう"
-                          },
-                          {
-                              "type": "postback",
-                              "label": "ごめんなさい",
-                              "data": "ごめんなさい",
-                              "text":"ごめんなさい"
-                          },
-                      ]
-                    },
-                    {
-                      "thumbnailImageUrl": "https://example.com/bot/images/item1.jpg",
-                      "imageBackgroundColor": "#FFFFFF",
-                      "title": "在宅時間を通知",
-                      "text": "だいたい、いつ帰る？？",
-                      "defaultAction": {
-                          "type": "uri",
-                          "label": "View detail",
-                          "uri": "http://example.com/page/123"
-                      },
-                      "actions": [
-                          {
-                              "type": "postback",
-                              "label": "夜には帰ります",
-                              "data": "夜には帰ります",
-                              "text":"夜には帰ります"
-                          },
-                          {
-                              "type": "postback",
-                              "label": "今日は帰りません",
-                              "data": "今日は帰りません",
-                              "text":"今日は帰りません"
-                          },
-                      ]
-                    }#,
-                ],
-                "imageAspectRatio": "rectangle",
-                "imageSize": "cover"
-            }
-    }
-        ]
-    }
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + channel_access_token 
-    }
-    requests.post(url, data=json.dumps(data), headers=headers)
-
-if __name__ == "__main__":  
+if __name__ == "__main__":
     port = int(os.getenv('PORT', 5000))
     app.run(debug=True, host='0.0.0.0', port=port)
